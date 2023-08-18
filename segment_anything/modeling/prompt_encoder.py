@@ -184,8 +184,8 @@ class PositionEmbeddingRandom(nn.Module):
 
     def _pe_encoding(self, coords: torch.Tensor) -> torch.Tensor:
         """Positionally encode points that are normalized to [0,1]."""
-        # assuming coords are in [0, 1]^2 square and have d_1 x ... x d_n x 2 shape
-        coords = 2 * coords - 1
+        # assuming coords are in [0, 1]^2 square and have d_1 x ... x d_n x 2 shape（这句是说，单个坐标点是(x,y)的形式在单位正方形内的。“d_1 x ... x d_n”则是说coords一共包括多少个points，以及这些points的shape）
+        coords = 2 * coords - 1 # 0~1=> -1~1
         coords = coords @ self.positional_encoding_gaussian_matrix
         coords = 2 * np.pi * coords
         # outputs d_1 x ... x d_n x C shape
@@ -198,10 +198,10 @@ class PositionEmbeddingRandom(nn.Module):
         grid = torch.ones((h, w), device=device, dtype=torch.float32)
         y_embed = grid.cumsum(dim=0) - 0.5
         x_embed = grid.cumsum(dim=1) - 0.5
-        y_embed = y_embed / h
-        x_embed = x_embed / w
+        y_embed = y_embed / h # 从0~1的y坐标
+        x_embed = x_embed / w # 从0~1的x坐标
 
-        pe = self._pe_encoding(torch.stack([x_embed, y_embed], dim=-1))
+        pe = self._pe_encoding(torch.stack([x_embed, y_embed], dim=-1)) # torch.stack 是把x_embed, y_embed合并成 (x, y) 坐标形式
         return pe.permute(2, 0, 1)  # C x H x W
 
     def forward_with_coords(
@@ -209,6 +209,6 @@ class PositionEmbeddingRandom(nn.Module):
     ) -> torch.Tensor:
         """Positionally encode points that are not normalized to [0,1]."""
         coords = coords_input.clone()
-        coords[:, :, 0] = coords[:, :, 0] / image_size[1]
-        coords[:, :, 1] = coords[:, :, 1] / image_size[0]
+        coords[:, :, 0] = coords[:, :, 0] / image_size[1] # x坐标（横）
+        coords[:, :, 1] = coords[:, :, 1] / image_size[0] # y左边（竖，从上而下）
         return self._pe_encoding(coords.to(torch.float))  # B x N x C
