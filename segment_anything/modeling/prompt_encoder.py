@@ -37,18 +37,19 @@ class PromptEncoder(nn.Module):
             input masks.
         """
         super().__init__()
-        self.embed_dim = embed_dim
+        self.embed_dim = embed_dim # 本文取256
         self.input_image_size = input_image_size
         self.image_embedding_size = image_embedding_size
         self.pe_layer = PositionEmbeddingRandom(embed_dim // 2)
 
-        self.num_point_embeddings: int = 4  # pos/neg point + 2 box corners
-        point_embeddings = [nn.Embedding(1, embed_dim) for i in range(self.num_point_embeddings)]
+        self.num_point_embeddings: int = 4  # pos/neg point + 2 box corners 
+        # 上面4个点依次对应：1. 点promot，且该点是物体上的点; 2. 点prompt，该点属于背景，3. box prompt，该点是box左上角; 4. box prompt 对应box左下角
+        point_embeddings = [nn.Embedding(1, embed_dim) for i in range(self.num_point_embeddings)] # 4个点类别的embedding
         self.point_embeddings = nn.ModuleList(point_embeddings)
-        self.not_a_point_embed = nn.Embedding(1, embed_dim)
+        self.not_a_point_embed = nn.Embedding(1, embed_dim) # 坐标值不是有效点时，点的类别的embedding。可以说这是承上的第五个点的类别
 
         self.mask_input_size = (4 * image_embedding_size[0], 4 * image_embedding_size[1])
-        self.mask_downscaling = nn.Sequential(
+        self.mask_downscaling = nn.Sequential( # CNN 四倍下采样
             nn.Conv2d(1, mask_in_chans // 4, kernel_size=2, stride=2),
             LayerNorm2d(mask_in_chans // 4),
             activation(),
@@ -57,7 +58,7 @@ class PromptEncoder(nn.Module):
             activation(),
             nn.Conv2d(mask_in_chans, embed_dim, kernel_size=1),
         )
-        self.no_mask_embed = nn.Embedding(1, embed_dim)
+        self.no_mask_embed = nn.Embedding(1, embed_dim) # 若没mask prompt，则用此填充。用此embed，作expand后填充到每个像素位置
 
     def get_dense_pe(self) -> torch.Tensor:
         """
@@ -73,30 +74,36 @@ class PromptEncoder(nn.Module):
     def _embed_points(
         self,
         points: torch.Tensor,
-        labels: torch.Tensor,
+        labels: torch.Tensor, # labels：取值0或1表示当前点是前景还是背景点
         pad: bool,
     ) -> torch.Tensor:
         """Embeds point prompts."""
         points = points + 0.5  # Shift to center of pixel
-        if pad:
+        if pad: # box prompt为空时，pad == True
             padding_point = torch.zeros((points.shape[0], 1, 2), device=points.device)
             padding_label = -torch.ones((labels.shape[0], 1), device=labels.device)
             points = torch.cat([points, padding_point], dim=1)
             labels = torch.cat([labels, padding_label], dim=1)
         point_embedding = self.pe_layer.forward_with_coords(points, self.input_image_size)
-        point_embedding[labels == -1] = 0.0
-        point_embedding[labels == -1] += self.not_a_point_embed.weight
-        point_embedding[labels == 0] += self.point_embeddings[0].weight
-        point_embedding[labels == 1] += self.point_embeddings[1].weight
+        point_embedding[labels == -1] = 0.0                              # 如果发生了上面的padding
+        point_embedding[labels == -1] += self.not_a_point_embed.weight   # 如果发生了上面的padding
+        point_embedding[labels == 0] += self.point_embeddings[0].weight  # 前景点。 注意 self.point_embeddings 共4个元素，各代表有所不停
+        point_embedding[labels == 1] += self.point_embeddings[1].weight  # 背景点
+        '''
+        如paper所言， 可见point 的embedding=点的位置编码 + 点的类别编码
+        '''
         return point_embedding
 
     def _embed_boxes(self, boxes: torch.Tensor) -> torch.Tensor:
         """Embeds box prompts."""
         boxes = boxes + 0.5  # Shift to center of pixel
-        coords = boxes.reshape(-1, 2, 2)
+        coords = boxes.reshape(-1, 2, 2) # 第二个参数2：box的左上右下共2个点
         corner_embedding = self.pe_layer.forward_with_coords(coords, self.input_image_size)
-        corner_embedding[:, 0, :] += self.point_embeddings[2].weight
-        corner_embedding[:, 1, :] += self.point_embeddings[3].weight
+        corner_embedding[:, 0, :] += self.point_embeddings[2].weight # 左上角。注意 self.point_embeddings 共4个元素，各代表有所不停。下标2是左上角
+        corner_embedding[:, 1, :] += self.point_embeddings[3].weight # 右下角。
+        '''
+        如paper所言，可见box的embedding=box顶点的位置编码 + 顶点的类别编码
+        '''
         return corner_embedding
 
     def _embed_masks(self, masks: torch.Tensor) -> torch.Tensor:
@@ -149,7 +156,8 @@ class PromptEncoder(nn.Module):
             Bx(embed_dim)x(embed_H)x(embed_W)
         """
         bs = self._get_batch_size(points, boxes, masks)
-        sparse_embeddings = torch.empty((bs, 0, self.embed_dim), device=self._get_device())
+        sparse_embeddings = torch.empty((bs, 0, self.embed_dim), device=self._get_device()) 
+        # 注意上面 empty内第一个参数 shape有一维为0，所以torch.empty()返回的是个空tensor.
         if points is not None:
             coords, labels = points
             point_embeddings = self._embed_points(coords, labels, pad=(boxes is None))
@@ -157,6 +165,7 @@ class PromptEncoder(nn.Module):
         if boxes is not None:
             box_embeddings = self._embed_boxes(boxes)
             sparse_embeddings = torch.cat([sparse_embeddings, box_embeddings], dim=1)
+        # 注意上面会把 points 与 boxes 的 embed 都拼接后包括进去
 
         if masks is not None:
             dense_embeddings = self._embed_masks(masks)
@@ -177,7 +186,7 @@ class PositionEmbeddingRandom(nn.Module):
         super().__init__()
         if scale is None or scale <= 0.0:
             scale = 1.0
-        self.register_buffer(
+        self.register_buffer( # 不作为可梯度优化的参数，而是作为常数使用
             "positional_encoding_gaussian_matrix",
             scale * torch.randn((2, num_pos_feats)),
         )
@@ -190,6 +199,10 @@ class PositionEmbeddingRandom(nn.Module):
         coords = 2 * np.pi * coords
         # outputs d_1 x ... x d_n x C shape
         return torch.cat([torch.sin(coords), torch.cos(coords)], dim=-1)
+        '''
+        https://arxiv.org/pdf/2006.10739.pdf
+        《attention is all you need》所用的位置编码，和这里的gaussian位置编码，都属于fourier类位置编码。
+        '''
 
     def forward(self, size: Tuple[int, int]) -> torch.Tensor:
         """Generate positional encoding for a grid of the specified size."""
@@ -209,6 +222,6 @@ class PositionEmbeddingRandom(nn.Module):
     ) -> torch.Tensor:
         """Positionally encode points that are not normalized to [0,1]."""
         coords = coords_input.clone()
-        coords[:, :, 0] = coords[:, :, 0] / image_size[1] # x坐标（横）
+        coords[:, :, 0] = coords[:, :, 0] / image_size[1] # x坐标（横，从左往右）
         coords[:, :, 1] = coords[:, :, 1] / image_size[0] # y左边（竖，从上而下）
         return self._pe_encoding(coords.to(torch.float))  # B x N x C
