@@ -60,7 +60,7 @@ class TwoWayTransformer(nn.Module):
 
         self.final_attn_token_to_image = Attention(
             embedding_dim, num_heads, 
-            downsample_rate=attention_downsample_rate # downsample_rate 即文中17页所说的： “However, in cross-attention layers where we have a
+            downsample_rate=attention_downsample_rate # 此文件中各处的 downsample_rate，对应文中17页所说的： “However, in cross-attention layers where we have a
                                                       #  64×64 image embedding, we reduce the channel dimension of 
                                                       #  the queries, keys, and values by 2× to 128 for computational efficiency. ”
         )
@@ -109,7 +109,7 @@ class TwoWayTransformer(nn.Module):
         k = keys + image_pe
         attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys) # 对应文中16页图14要往下对接两个MLP的那个token2img attn
         queries = queries + attn_out
-        queries = self.norm_final_attn(queries)
+        queries = self.norm_final_attn(queries) # laryer norm
 
         return queries, keys
 
