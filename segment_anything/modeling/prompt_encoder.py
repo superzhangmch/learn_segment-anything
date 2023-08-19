@@ -49,7 +49,7 @@ class PromptEncoder(nn.Module):
         self.not_a_point_embed = nn.Embedding(1, embed_dim) # 坐标值不是有效点时，点的类别的embedding。可以说这是承上的第五个点的类别
 
         self.mask_input_size = (4 * image_embedding_size[0], 4 * image_embedding_size[1]) # 4倍下采样，故乘4
-        self.mask_downscaling = nn.Sequential( # CNN 四倍下采样
+        self.mask_downscaling = nn.Sequential( # CNN 四倍下采样. 所以mask_embed fea_map大小和img_emb是一样的
             nn.Conv2d(1, mask_in_chans // 4, kernel_size=2, stride=2),
             LayerNorm2d(mask_in_chans // 4),
             activation(),
