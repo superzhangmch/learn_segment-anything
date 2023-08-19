@@ -4,6 +4,10 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+'''
+《segment anything》中mask decoder 的 transformer的实现就在此文件中。和一般transformer不同之处：额外多个反向cross_attn，从而拿到的是更新后的q/kv(而非只q)
+'''
+
 import torch
 from torch import Tensor, nn
 
@@ -42,7 +46,7 @@ class TwoWayTransformer(nn.Module):
         self.mlp_dim = mlp_dim
         self.layers = nn.ModuleList()
 
-        for i in range(depth):
+        for i in range(depth): # 文中为2层
             self.layers.append(
                 TwoWayAttentionBlock(
                     embedding_dim=embedding_dim,
@@ -55,7 +59,10 @@ class TwoWayTransformer(nn.Module):
             )
 
         self.final_attn_token_to_image = Attention(
-            embedding_dim, num_heads, downsample_rate=attention_downsample_rate
+            embedding_dim, num_heads, 
+            downsample_rate=attention_downsample_rate # downsample_rate 即文中17页所说的： “However, in cross-attention layers where we have a
+                                                      #  64×64 image embedding, we reduce the channel dimension of 
+                                                      #  the queries, keys, and values by 2× to 128 for computational efficiency. ”
         )
         self.norm_final_attn = nn.LayerNorm(embedding_dim)
 
@@ -96,10 +103,11 @@ class TwoWayTransformer(nn.Module):
                 key_pe=image_pe,
             )
 
+        # 下面是对 queryies 再做一个更新，对keys(img emb)则不再变动
         # Apply the final attention layer from the points to the image
         q = queries + point_embedding
         k = keys + image_pe
-        attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys)
+        attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys) # 对应文中16页图14要往下对接两个MLP的那个token2img attn
         queries = queries + attn_out
         queries = self.norm_final_attn(queries)
 
@@ -151,11 +159,24 @@ class TwoWayAttentionBlock(nn.Module):
     def forward(
         self, queries: Tensor, keys: Tensor, query_pe: Tensor, key_pe: Tensor
     ) -> Tuple[Tensor, Tensor]:
-        # Self attention block
+        '''
+        注意这个函数中 q k的对应关系：
+            queries: 对应point embeddings
+            query_pe: 如文中所言，对应最初的point embedding
+            keys: 对应image embedding
+        '''
+        
+        # Self attention block # 即使是point embedding之间，也可以做self attention
         if self.skip_first_layer_pe:
             queries = self.self_attn(q=queries, k=queries, v=queries)
         else:
             q = queries + query_pe
+            '''
+             self.skip_first_layer_pe ==True 的时候，queries == query_pe, 所以不需对二者相加。
+             这里以及下面对query_pe求和，对应的是文中16页所说的：
+                                "the entire original prompt tokens (including their positional encodings) are re-added to 
+                                 the updated tokens whenever they participate in an attention layer. "
+            '''
             attn_out = self.self_attn(q=q, k=q, v=queries)
             queries = queries + attn_out
         queries = self.norm1(queries)
@@ -163,15 +184,17 @@ class TwoWayAttentionBlock(nn.Module):
         # Cross attention block, tokens attending to image embedding
         q = queries + query_pe
         k = keys + key_pe
-        attn_out = self.cross_attn_token_to_image(q=q, k=k, v=keys)
+        attn_out = self.cross_attn_token_to_image(q=q, k=k, v=keys) # 注意一个细节：attn中，如果涉及到位置编码，都是q与k上加位置编码，v上不加
+                                                                    # 此文件中，其他地方，也遵循了此点
         queries = queries + attn_out
         queries = self.norm2(queries)
 
         # MLP block
         mlp_out = self.mlp(queries)
         queries = queries + mlp_out
-        queries = self.norm3(queries)
+        queries = self.norm3(queries) # q，即point embedding，得到了最终的更新
 
+        # ==== 开始更新 keys（image embedding）
         # Cross attention block, image embedding attending to tokens
         q = queries + query_pe
         k = keys + key_pe
