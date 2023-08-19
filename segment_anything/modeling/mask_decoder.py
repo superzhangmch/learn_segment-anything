@@ -157,6 +157,7 @@ class MaskDecoder(nn.Module):
         b, c, h, w = upscaled_embedding.shape
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w) 
         # mask.shape: [bs, num_mask_token, e/8] @ [bs, e/8, h*w]=> [bs, num_mask_tokens, h*w]=>[bs, num_mask_tokens, h, w]
+        # 上面这步@操作：乃对于每个候选mask结果，用一组来自hyper_in的channel weight，对upscaled_embedding的channels作加权求和，从而得到mask预测结果
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out) # MLP: => [bs, num_mask_tokens]个Iou预测结果
