@@ -122,12 +122,14 @@ class MaskDecoder(nn.Module):
 
     def predict_masks(
         self,
-        image_embeddings: torch.Tensor,
+        image_embeddings: torch.Tensor, # 预测时：[1, c, h, w], 一次一个图片
         image_pe: torch.Tensor,
-        sparse_prompt_embeddings: torch.Tensor,  # points prompt
+        sparse_prompt_embeddings: torch.Tensor,  # points prompt，[bs, ...]， batchsize对应的是一个图片的多个期望的mask预测
         dense_prompt_embeddings: torch.Tensor,   # mask prompt
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Predicts masks. See 'forward' for more details."""
+        """Predicts masks. See 'forward' for more details.
+        预测一张图的多个mask。每个预测mask对应batch中一个元素
+        """
         # Concatenate output tokens
         output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0) 
         # iou_token.shape = [1, emb_dim], mask_token.shape = [3+1, emb_dim], 3+1: mask cnt
@@ -135,7 +137,8 @@ class MaskDecoder(nn.Module):
         
         output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1) # 扩展到batch_size个
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)  # sparse_prompt_embeddings.shape = [bs, point_cnt, emb_dim]
-
+        # 注意预测时，一张图可能要给出多个mask预测，那么把这多个放到一个batch里
+        
         # Expand per-image data in batch direction to be per-mask
         src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0) # 单个img的img_emb扩展到bs个
         src = src + dense_prompt_embeddings # dense_emb.shape = [bs, emb_dim==c, h=ori_img_h/16, w]
