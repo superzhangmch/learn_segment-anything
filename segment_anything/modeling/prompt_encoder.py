@@ -166,6 +166,10 @@ class PromptEncoder(nn.Module):
             box_embeddings = self._embed_boxes(boxes)
             sparse_embeddings = torch.cat([sparse_embeddings, box_embeddings], dim=1)
         # 注意上面会把 points 与 boxes 的 embed 都拼接后包括进去
+        '''
+        上面对于points与boxes的位置编码，总结起来，即：点按一个point算，box按两个point算，形成一个序列，序列长度是点的个数; 
+        序列元素内容即点的embedding（==“点位置编码+点label编码”）
+        '''
 
         if masks is not None:
             dense_embeddings = self._embed_masks(masks)
