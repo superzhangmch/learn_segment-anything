@@ -68,9 +68,9 @@ class TwoWayTransformer(nn.Module):
 
     def forward(
         self,
-        image_embedding: Tensor,
+        image_embedding: Tensor, # image embedding(其实是img_emb + mask_prompt_emb)
         image_pe: Tensor,
-        point_embedding: Tensor,
+        point_embedding: Tensor, # points prompt embs 与 box prompt embs
     ) -> Tuple[Tensor, Tensor]:
         """
         Args:
@@ -163,7 +163,7 @@ class TwoWayAttentionBlock(nn.Module):
         注意这个函数中 q k的对应关系：
             queries: 对应point embeddings
             query_pe: 如文中所言，对应最初的point embedding
-            keys: 对应image embedding
+            keys: 对应image embedding(其实是img_emb + mask_prompt_emb)
         '''
         
         # Self attention block # 即使是point embedding之间，也可以做self attention
