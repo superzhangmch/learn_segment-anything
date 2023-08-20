@@ -137,6 +137,8 @@ class MaskDecoder(nn.Module):
         
         output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1) # 扩展到batch_size个
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)  # sparse_prompt_embeddings.shape = [bs, point_cnt, emb_dim]
+        # note: batch中一个样本，对于“多点prompt 或(和) box prompt组成的prompt”只是用来预测一个mask的
+        
         # 注意预测时，一张图可能要给出多个mask预测，那么把这多个放到一个batch里
         
         # Expand per-image data in batch direction to be per-mask
