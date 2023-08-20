@@ -128,7 +128,7 @@ class MaskDecoder(nn.Module):
         dense_prompt_embeddings: torch.Tensor,   # mask prompt
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predicts masks. See 'forward' for more details.
-        预测一张图的多个mask。每个预测mask对应batch中一个元素
+        预测一张图的多个mask(可看本文件28行所言)。每个预测mask对应batch中一个元素
         """
         # Concatenate output tokens
         output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0) 
@@ -164,7 +164,7 @@ class MaskDecoder(nn.Module):
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out) # MLP: => [bs, num_mask_tokens]个Iou预测结果
-
+        # iou_pred 由多层MLP得到0~1之间的Iou，按说用sigmoid限定预测很合理，但作者直接就是只用多层linear+relu就行了
         return masks, iou_pred
 
 
@@ -190,6 +190,6 @@ class MLP(nn.Module):
     def forward(self, x):
         for i, layer in enumerate(self.layers):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
-        if self.sigmoid_output:
+        if self.sigmoid_output: # Iou预测也没用sigmoid
             x = F.sigmoid(x)
         return x
